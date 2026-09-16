@@ -1,0 +1,26 @@
+# GLIM 依赖库源码快照清单
+
+打包时间: 2026-09-16
+用途: 安装脚本( GLIM一件安装脚本V1.0.sh )在 GitHub 克隆失败时,自动回退到本仓库下载这些固定版本快照,保证克隆稳定性与版本一致性。
+
+## 快照说明
+
+每个 `*.tar.gz` 为对应仓库工作树快照(不含 `.git` 与 `build` 目录),解压即可直接编译。
+
+| 快照文件 | 上游仓库 | 固定版本/提交 | 说明 |
+|---|---|---|---|
+| gtsam.tar.gz | https://github.com/borglab/gtsam | tag `4.3a1` @ `2f3e56c0ddbd3a1aa54ed043643b553d26a069f6` | 必须用 4.3a1(含 PreintegratedImuMeasurementsT 模板实例化) |
+| iridescence.tar.gz | https://github.com/koide3/iridescence | `cfb82c631a42392454395545e87a9c28f97ef84a` (master) | 含全部 submodule(imgui 等) |
+| gtsam_points.tar.gz | https://github.com/koide3/gtsam_points | `76437e4ddb03df98a4f8a875c8de28edb0394c7c` (master) | 含 has_index 等 glim 所需新 API |
+| glim.tar.gz | https://github.com/koide3/glim | `2262aafa2369acff6afab2268a7743aec7a7fa49` (master) | |
+| glim_ros2.tar.gz | https://github.com/koide3/glim_ros2 | `4d4ec524ccf1b02aa09b0af2af767ecc54343798` (master) | |
+
+## 更新快照
+
+上游更新后,在装有 glim 源码的机器上重新打包并推送:
+
+```bash
+cd /home/hajies/ros2_ws/GLIMinstall
+cd /home/hajies/lib/src/gtsam && git pull && tar --exclude=.git --exclude=build -czf /home/hajies/ros2_ws/GLIMinstall/gtsam.tar.gz .
+# ... 其余库同理,更新 VERSIONS.txt 中的提交号后 git commit && git push
+```
