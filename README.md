@@ -39,9 +39,12 @@ chmod +x GLIM_install_static.sh
 
 ## 安装脚本如何回退
 
-脚本 `GLIM_install_static.sh` 中的 `retry_clone` 在 GitHub 克隆失败 3 次后,会通过 `gh api` 从本仓库下载 `<名字>.tar.gz` 并解压(以 `.glim_mirror` 标记),完全离线继续编译。
+脚本 `GLIM_install_static.sh`(V1.8)启动时先**整体 `git clone` 本仓库**到本地缓存(`~/lib/glim_mirror_cache`,公开仓库无需任何登录),之后所有库直接解压缓存中的 `<名字>.tar.gz` 编译(以 `.glim_mirror` 标记)。GitHub 直连克隆仅在镜像缓存不可用时作为回退。
 
-回退仓库可通过环境变量覆盖:
+- 不需要 gh 登录,不依赖 raw.githubusercontent.com(该域名部分地区网络不稳定)
+- 缓存可离线复用;镜像仓库更新快照后,删除 `~/lib/glim_mirror_cache` 再运行脚本即可刷新
+
+镜像仓库可通过环境变量覆盖:
 
 ```bash
 export GLIM_MIRROR_REPO="你的GitHub用户名/GLIMinstall"

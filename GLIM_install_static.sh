@@ -58,6 +58,11 @@ set -euo pipefail
 #   - [修复] 下载顺序改回 gh api 优先(已登录 gh 的机器走 api.github.com，GFW 下比 raw 稳定，
 #     笔记本实测 raw 连接后无响应)；curl raw 仅作未登录环境兜底
 #   - [修复] curl 增加 --connect-timeout/--max-time，防 GFW 对 raw 丢包时无限挂起
+# Changelog V1.7.1→V1.8:
+#   - [改进] 镜像使用方式彻底简化: 脚本先整体 git clone 镜像仓库到本地缓存(~/.lib/glim_mirror_cache)，
+#     之后所有库直接从缓存中的 tar.gz 解压编译——不需要 gh 登录，也不依赖 curl/raw 域名
+#     (GFW 下 raw.githubusercontent.com 经常被墙)；缓存可离线复用，
+#     刷新方式: 删除 ~/lib/glim_mirror_cache 后重跑本脚本
 # =========================
 
 welcome() {
@@ -758,25 +763,17 @@ retry_clone() {
   local url="$1" dest="$2"; shift 2
   local name="${url##*/}"
   # V1.4: 私有仓库镜像版 —— 优先从镜像仓库下载固定版本源码快照，保证版本一致
-  # V1.7.1: 已登录 gh 的机器优先走 gh api(api.github.com，GFW 下比 raw 稳定、支持私有仓库)；
-  #         未登录 gh 时用 curl 匿名拉取 raw.githubusercontent.com(公开仓库免登录)；
-  #         curl 带超时防止网络丢包时无限挂起，两条通道都失败则回退 GitHub 直接克隆
-  if [[ -n "${GLIM_MIRROR_REPO:-}" ]]; then
-    echo "[INFO] 从镜像仓库 $GLIM_MIRROR_REPO 下载 $name 固定版本源码快照..."
-    local dl_ok=0
-    if command -v gh >/dev/null 2>&1 && gh api "repos/$GLIM_MIRROR_REPO/contents/${name}.tar.gz" -H "Accept: application/vnd.github.raw" > "/tmp/${name}.tar.gz" 2>/dev/null; then
-      dl_ok=1
-    elif curl -fsSL --connect-timeout 10 --max-time 180 --retry 1 --retry-delay 2 "https://raw.githubusercontent.com/${GLIM_MIRROR_REPO}/main/${name}.tar.gz" -o "/tmp/${name}.tar.gz" 2>/dev/null; then
-      dl_ok=1
-    fi
-    if [[ "$dl_ok" -eq 1 ]] && mkdir -p "$dest" && tar -xzf "/tmp/${name}.tar.gz" -C "$dest" --strip-components=1; then
-      rm -f "/tmp/${name}.tar.gz"
+  # V1.8: 镜像仓库已由主脚本整体 git clone 到本地缓存(MIRROR_CACHE)，
+  #       直接从缓存中的 tar.gz 解压即可——无需 gh 登录、无需 curl/raw 域名；
+  #       缓存不可用时回退 GitHub 直接克隆
+  if [[ -n "${MIRROR_CACHE:-}" && -f "$MIRROR_CACHE/${name}.tar.gz" ]]; then
+    echo "[INFO] 从镜像缓存提取 $name 固定版本源码快照..."
+    if mkdir -p "$dest" && tar -xzf "$MIRROR_CACHE/${name}.tar.gz" -C "$dest" --strip-components=1; then
       touch "$dest/.glim_mirror"
-      echo "[INFO] 已从镜像仓库取得 $name 源码快照(版本已固定)。"
+      echo "[INFO] 已从镜像缓存取得 $name 源码快照(版本已固定)。"
       return 0
     fi
-    rm -f "/tmp/${name}.tar.gz" 2>/dev/null || true
-    echo "[WARN] 从镜像仓库下载 $name 失败，回退到 GitHub 直接克隆..."
+    echo "[WARN] 从镜像缓存提取 $name 失败，回退到 GitHub 直接克隆..."
   fi
   local i
   for i in 1 2 3; do
@@ -793,8 +790,8 @@ retry_clone() {
   echo "  仓库地址: $url"
   echo ""
   echo "  请按以下步骤排查后重新运行本脚本："
-  echo "   1. 确认网络连通: ping github.com / ping raw.githubusercontent.com"
-  echo "   2. 私有镜像仓库需 gh 登录: gh auth status"
+  echo "   1. 确认网络连通: ping github.com"
+  echo "   2. 镜像缓存(~/.lib/glim_mirror_cache)克隆失败时，确认 git 可匿名访问镜像仓库"
   echo "   3. 若使用代理，请先配置 git 代理或系统代理后重跑本脚本"
   echo "  已成功获取的仓库会被保留，重跑脚本可从断点继续，"
   echo "  无需重新下载已完成的部分。"
@@ -807,7 +804,8 @@ run_as_owner() {
   if [[ "$(id -u)" -eq 0 ]]; then
     # V1.1: 传递图形环境变量，保证以 sudo 运行时 GUI 仍能在用户桌面显示
     # V1.2: 注入 retry_clone 函数定义，使子 shell 中的克隆自动重试并友好报错
-    sudo -u "$OWNER_USER" -H env DISPLAY="${DISPLAY:-}" XAUTHORITY="${XAUTHORITY:-}" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" GLIM_MIRROR_REPO="${GLIM_MIRROR_REPO:-}" bash -lc "$RETRY_CLONE_FUNC"$'\n'"$*"
+    # V1.8: 传递镜像缓存路径，子 shell 中的 retry_clone 直接从缓存解压快照
+    sudo -u "$OWNER_USER" -H env DISPLAY="${DISPLAY:-}" XAUTHORITY="${XAUTHORITY:-}" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" GLIM_MIRROR_REPO="${GLIM_MIRROR_REPO:-}" MIRROR_CACHE="${MIRROR_CACHE:-}" bash -lc "$RETRY_CLONE_FUNC"$'\n'"$*"
   else
     bash -lc "$RETRY_CLONE_FUNC"$'\n'"$*"
   fi
@@ -1081,6 +1079,29 @@ fi
 #       编译相互独立，并行执行；③gtsam_points 依赖前两者，等其完成后单独编译。
 #       并行任务输出统一加行前缀(如 [克隆:gtsam] / [编译:iridescence])，
 #       同时写入 /tmp 日志；失败时自动打印各日志尾部并中止。
+
+# ---------- V1.8: 克隆镜像仓库到本地缓存 ----------
+# 整体 git clone 镜像仓库(公开仓库无需登录)到本地缓存，之后所有库直接从缓存中的
+# tar.gz 解压编译——彻底摆脱 gh 登录与 curl/raw 域名(GFW 下 raw 常被墙)。
+# 缓存位置: ~/lib/glim_mirror_cache；存在 .mirror_ready 标记时直接复用(可离线)。
+MIRROR_CACHE="$LIB_ROOT/glim_mirror_cache"
+NEED_MIRROR=0
+if [[ "$SKIP_GTSAM" -eq 0 || "$SKIP_IRID" -eq 0 || "$SKIP_GP" -eq 0 ]] \
+   || [[ ! -d "$WS_DIR/src/glim" ]] || [[ ! -d "$WS_DIR/src/glim_ros2" ]]; then
+  NEED_MIRROR=1
+fi
+if [[ "$NEED_MIRROR" -eq 1 && -n "${GLIM_MIRROR_REPO:-}" ]]; then
+  if [[ -f "$MIRROR_CACHE/.mirror_ready" ]]; then
+    log "镜像仓库本地缓存已就绪，直接使用。"
+  else
+    log "克隆镜像仓库 $GLIM_MIRROR_REPO 到本地缓存(一次性下载全部快照，后续可离线复用)..."
+    run_as_owner "rm -rf '$MIRROR_CACHE' && for i in 1 2 3; do git -c http.version=HTTP/1.1 -c http.postBuffer=524288000 clone --depth 1 'https://github.com/${GLIM_MIRROR_REPO}.git' '$MIRROR_CACHE' && break; echo '[WARN] 镜像仓库克隆第 \$i 次失败，5 秒后重试...'; sleep 5; done; [[ -d '$MIRROR_CACHE/.git' ]] && touch '$MIRROR_CACHE/.mirror_ready' && echo '[INFO] 镜像仓库已克隆到本地缓存。'" || true
+    if [[ ! -f "$MIRROR_CACHE/.mirror_ready" ]]; then
+      warn "镜像仓库克隆失败，各库将回退到 GitHub 直接克隆。"
+    fi
+  fi
+fi
+export MIRROR_CACHE
 
 # ---------- 阶段一: 并行克隆源码 ----------
 log "并行克隆第三方库源码 (gtsam / iridescence / gtsam_points)..."
