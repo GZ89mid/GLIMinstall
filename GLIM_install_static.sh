@@ -1095,7 +1095,7 @@ if [[ "$NEED_MIRROR" -eq 1 && -n "${GLIM_MIRROR_REPO:-}" ]]; then
     log "镜像仓库本地缓存已就绪，直接使用。"
   else
     log "克隆镜像仓库 $GLIM_MIRROR_REPO 到本地缓存(一次性下载全部快照，后续可离线复用)..."
-    run_as_owner "rm -rf '$MIRROR_CACHE' && for i in 1 2 3; do git -c http.version=HTTP/1.1 -c http.postBuffer=524288000 clone --depth 1 'https://github.com/${GLIM_MIRROR_REPO}.git' '$MIRROR_CACHE' && break; echo '[WARN] 镜像仓库克隆第 \$i 次失败，5 秒后重试...'; sleep 5; done; [[ -d '$MIRROR_CACHE/.git' ]] && touch '$MIRROR_CACHE/.mirror_ready' && echo '[INFO] 镜像仓库已克隆到本地缓存。'" || true
+    run_as_owner "rm -rf '$MIRROR_CACHE' && for i in 1 2 3; do git -c http.version=HTTP/1.1 -c http.postBuffer=524288000 clone --depth 1 'https://github.com/${GLIM_MIRROR_REPO}.git' '$MIRROR_CACHE' && break; echo \"[WARN] 镜像仓库克隆第 \$i 次失败，5 秒后重试...\"; sleep 5; done; [[ -d '$MIRROR_CACHE/.git' ]] && touch '$MIRROR_CACHE/.mirror_ready' && echo '[INFO] 镜像仓库已克隆到本地缓存。'" || true
     if [[ ! -f "$MIRROR_CACHE/.mirror_ready" ]]; then
       warn "镜像仓库克隆失败，各库将回退到 GitHub 直接克隆。"
     fi
