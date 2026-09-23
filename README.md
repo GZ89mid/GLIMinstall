@@ -9,12 +9,12 @@
 
 ```bash
 # 1. 下载一键安装脚本(镜像优先版 V1.6)
-wget -O glim-install.sh https://raw.githubusercontent.com/GZ89mid/GLIMinstall/main/GLIM_install_static.sh
-# 或: curl -L -o glim-install.sh https://raw.githubusercontent.com/GZ89mid/GLIMinstall/main/GLIM_install_static.sh
+wget https://raw.githubusercontent.com/GZ89mid/GLIMinstall/main/GLIM_install_static.sh
+# 或: curl -L -O https://raw.githubusercontent.com/GZ89mid/GLIMinstall/main/GLIM_install_static.sh
 
 # 2. 赋予执行权限并运行
-chmod +x glim-install.sh
-./glim-install.sh
+chmod +x GLIM_install_static.sh
+./GLIM_install_static.sh
 ```
 
 运行后按提示选择第三方库清理模式:
