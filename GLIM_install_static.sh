@@ -54,6 +54,10 @@ set -euo pipefail
 # Changelog V1.6→V1.7:
 #   - [修复] 镜像仓库下载优先用 curl 匿名拉取 raw.githubusercontent.com(公开仓库无需 gh 登录，
 #     修复未登录 gh 的服务器上镜像下载失败回退 GitHub 的问题)；gh api 仅作私有仓库兜底
+# Changelog V1.7→V1.7.1:
+#   - [修复] 下载顺序改回 gh api 优先(已登录 gh 的机器走 api.github.com，GFW 下比 raw 稳定，
+#     笔记本实测 raw 连接后无响应)；curl raw 仅作未登录环境兜底
+#   - [修复] curl 增加 --connect-timeout/--max-time，防 GFW 对 raw 丢包时无限挂起
 # =========================
 
 welcome() {
@@ -754,14 +758,15 @@ retry_clone() {
   local url="$1" dest="$2"; shift 2
   local name="${url##*/}"
   # V1.4: 私有仓库镜像版 —— 优先从镜像仓库下载固定版本源码快照，保证版本一致
-  # V1.7: 公开仓库优先用 curl 匿名下载 raw 文件(无需 gh 登录、无 1MB 限制)；
-  #       gh api 仅作私有仓库兜底
+  # V1.7.1: 已登录 gh 的机器优先走 gh api(api.github.com，GFW 下比 raw 稳定、支持私有仓库)；
+  #         未登录 gh 时用 curl 匿名拉取 raw.githubusercontent.com(公开仓库免登录)；
+  #         curl 带超时防止网络丢包时无限挂起，两条通道都失败则回退 GitHub 直接克隆
   if [[ -n "${GLIM_MIRROR_REPO:-}" ]]; then
     echo "[INFO] 从镜像仓库 $GLIM_MIRROR_REPO 下载 $name 固定版本源码快照..."
     local dl_ok=0
-    if curl -fsSL --retry 2 --retry-delay 2 "https://raw.githubusercontent.com/${GLIM_MIRROR_REPO}/main/${name}.tar.gz" -o "/tmp/${name}.tar.gz" 2>/dev/null; then
+    if command -v gh >/dev/null 2>&1 && gh api "repos/$GLIM_MIRROR_REPO/contents/${name}.tar.gz" -H "Accept: application/vnd.github.raw" > "/tmp/${name}.tar.gz" 2>/dev/null; then
       dl_ok=1
-    elif command -v gh >/dev/null 2>&1 && gh api "repos/$GLIM_MIRROR_REPO/contents/${name}.tar.gz" -H "Accept: application/vnd.github.raw" > "/tmp/${name}.tar.gz" 2>/dev/null; then
+    elif curl -fsSL --connect-timeout 10 --max-time 180 --retry 1 --retry-delay 2 "https://raw.githubusercontent.com/${GLIM_MIRROR_REPO}/main/${name}.tar.gz" -o "/tmp/${name}.tar.gz" 2>/dev/null; then
       dl_ok=1
     fi
     if [[ "$dl_ok" -eq 1 ]] && mkdir -p "$dest" && tar -xzf "/tmp/${name}.tar.gz" -C "$dest" --strip-components=1; then
