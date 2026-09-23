@@ -51,6 +51,9 @@ set -euo pipefail
 #   - [修复] run_as_owner 中的 export LD_LIBRARY_PATH 改为外层转义双引号(\")包裹且 $LD_LIBRARY_PATH 转义为 \$LD_LIBRARY_PATH(5 处)：既防外层提前展开成终端值覆盖 source 注入的库路径，又防单引号阻止内层展开导致字面量 \$LD_LIBRARY_PATH 污染，确保工作区/ROS 库路径保留(修复 undefined symbol 与 librcl_action.so 导入失败)
 #   - [修复] 新增清理 /opt/ros/humble 中旧版脚本残留的 glim/glim_ros 库与配置，消除动态库/CMake 版本冲突
 #   - [优化] 三个库源码并行克隆；GTSAM 与 iridescence 并行编译；输出加行前缀并写日志，失败自动汇总
+# Changelog V1.6→V1.7:
+#   - [修复] 镜像仓库下载优先用 curl 匿名拉取 raw.githubusercontent.com(公开仓库无需 gh 登录，
+#     修复未登录 gh 的服务器上镜像下载失败回退 GitHub 的问题)；gh api 仅作私有仓库兜底
 # =========================
 
 welcome() {
@@ -751,10 +754,17 @@ retry_clone() {
   local url="$1" dest="$2"; shift 2
   local name="${url##*/}"
   # V1.4: 私有仓库镜像版 —— 优先从镜像仓库下载固定版本源码快照，保证版本一致
-  if [[ -n "${GLIM_MIRROR_REPO:-}" ]] && command -v gh >/dev/null 2>&1; then
+  # V1.7: 公开仓库优先用 curl 匿名下载 raw 文件(无需 gh 登录、无 1MB 限制)；
+  #       gh api 仅作私有仓库兜底
+  if [[ -n "${GLIM_MIRROR_REPO:-}" ]]; then
     echo "[INFO] 从镜像仓库 $GLIM_MIRROR_REPO 下载 $name 固定版本源码快照..."
-    if gh api "repos/$GLIM_MIRROR_REPO/contents/${name}.tar.gz" -H "Accept: application/vnd.github.raw" > "/tmp/${name}.tar.gz" 2>/dev/null \
-      && mkdir -p "$dest" && tar -xzf "/tmp/${name}.tar.gz" -C "$dest" --strip-components=1; then
+    local dl_ok=0
+    if curl -fsSL --retry 2 --retry-delay 2 "https://raw.githubusercontent.com/${GLIM_MIRROR_REPO}/main/${name}.tar.gz" -o "/tmp/${name}.tar.gz" 2>/dev/null; then
+      dl_ok=1
+    elif command -v gh >/dev/null 2>&1 && gh api "repos/$GLIM_MIRROR_REPO/contents/${name}.tar.gz" -H "Accept: application/vnd.github.raw" > "/tmp/${name}.tar.gz" 2>/dev/null; then
+      dl_ok=1
+    fi
+    if [[ "$dl_ok" -eq 1 ]] && mkdir -p "$dest" && tar -xzf "/tmp/${name}.tar.gz" -C "$dest" --strip-components=1; then
       rm -f "/tmp/${name}.tar.gz"
       touch "$dest/.glim_mirror"
       echo "[INFO] 已从镜像仓库取得 $name 源码快照(版本已固定)。"
@@ -778,8 +788,8 @@ retry_clone() {
   echo "  仓库地址: $url"
   echo ""
   echo "  请按以下步骤排查后重新运行本脚本："
-  echo "   1. 确认 gh 已登录且有权访问镜像仓库: gh auth status"
-  echo "   2. 确认网络连通: ping github.com"
+  echo "   1. 确认网络连通: ping github.com / ping raw.githubusercontent.com"
+  echo "   2. 私有镜像仓库需 gh 登录: gh auth status"
   echo "   3. 若使用代理，请先配置 git 代理或系统代理后重跑本脚本"
   echo "  已成功获取的仓库会被保留，重跑脚本可从断点继续，"
   echo "  无需重新下载已完成的部分。"
